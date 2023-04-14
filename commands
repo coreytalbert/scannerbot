@@ -1,0 +1,3 @@
+#!/bin/bash
+timestamp() { date; }
+rtl_fm -M wbfm -f 89.5M | play -r 32k -t raw -e signed -b 16 -c 1 -V1 - | rec "$(timestamp)".wav
