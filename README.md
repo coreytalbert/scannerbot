@@ -2,7 +2,7 @@
 
 Scannerbot transcribes radio transmissions and publishes them to social media.
 
-## Dependencies
+#### Dependencies
 * rtl_fm
 * SoX
 * Whisper
