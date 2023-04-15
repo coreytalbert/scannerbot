@@ -27,4 +27,4 @@ def tweet(api: tweepy.API, message: str):
 
 if __name__ == "__main__":
 	api = api()
-	tweet(api, read_file("test_tweet.txt")
+	tweet(api, "test tweet")
