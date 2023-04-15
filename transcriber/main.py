@@ -10,10 +10,10 @@ import sys
 import whisper
 
 class Transcriber:
-    def __init__(self, input_path):
+    def __init__(self, input_path, model="base"):
         self.input_path = input_path
         # initialize whisper
-        self.model = whisper.load_model("base")
+        self.model = whisper.load_model(model)
         # perform transcription
         self.output_text = self.model.transcribe(input_path)
 
