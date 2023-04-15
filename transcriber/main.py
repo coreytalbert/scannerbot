@@ -6,7 +6,7 @@
 # Before using OpenAI's Whisper, it must be installed on the development
 # machine.
 # https://github.com/openai/whisper#setup
-
+import sys
 import whisper
 
 class Transcriber:
@@ -18,7 +18,8 @@ class Transcriber:
         self.output_text = self.model.transcribe(input_path)
 
     def __str__(self):
-        return f"Transcriber [path={self.input_path}, text={self.output_text}]"
+        #return f"Transcriber [path={self.input_path}, text={self.output_text}]"
+        return self.output_text.get("text")
 
 # end class Transcriber
 
@@ -26,7 +27,15 @@ class Transcriber:
 
 
 def main():
-    t = Transcriber("example_sanmarcos.mp3")
+    if (len(sys.argv) < 2):
+        print("Missing filename.\nUsage:\n\tmain.py filename")
+        sys.exit()
+    elif (len(sys.argv) > 2):
+        print("Too many arguments.")
+        sys.exit()
+    filename = sys.argv[1]
+    
+    t = Transcriber(filename)
     print(t)
 
 
