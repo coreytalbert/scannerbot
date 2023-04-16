@@ -128,8 +128,9 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# VS Code config
+# IDE config
 .vscode
+.vs
 
 # Sound files
 *.wav
