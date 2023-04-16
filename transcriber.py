@@ -15,31 +15,25 @@ class Transcriber:
         # initialize whisper
         self.model = whisper.load_model(model)
         # perform transcription
-        self.output_text = self.model.transcribe(input_path)
+        self.output_text = self.model.transcribe(input_path, verbose=True, language="en")
 
     def __str__(self):
         #return f"Transcriber [path={self.input_path}, text={self.output_text}]"
         return self.output_text.get("text")
-
-# end class Transcriber
-
-# ========== start demo ==========
 
 
 def main():
     if (len(sys.argv) < 2):
         print("Missing filename.\nUsage:\n\tmain.py filename")
         sys.exit()
-    elif (len(sys.argv) > 2):
+    elif (len(sys.argv) > 3):
         print("Too many arguments.")
         sys.exit()
     filename = sys.argv[1]
     
-    t = Transcriber(filename)
+    t = Transcriber(filename, "large")
     print(t)
 
 
 if __name__ == "__main__":
     main()
-
-# ========== end demo ==========

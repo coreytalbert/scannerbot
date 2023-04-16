@@ -133,3 +133,7 @@ dmypy.json
 
 # Sound files
 *.wav
+*.mp3
+
+# API keya
+keys.py
