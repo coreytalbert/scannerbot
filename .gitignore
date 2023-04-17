@@ -137,5 +137,8 @@ __pycache__
 *.wav
 *.mp3
 
-# API keya
+# API keys
 keys.*
+
+# Binaries
+/bin/

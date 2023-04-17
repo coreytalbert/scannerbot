@@ -1,0 +1,3 @@
+openai-whisper==20230314
+python-dotenv==1.0.0
+tweepy==4.13.0
