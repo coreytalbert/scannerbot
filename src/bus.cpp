@@ -25,7 +25,7 @@ vector<thread *> threads;
 
 void signalHandler(int signum)
 {
-    cout << "Interrupt signal (" << signum << ") received.\n";
+    cout << "\nInterrupt signal (" << signum << ") received.\n";
     do_exit = true;
 
     for (thread * t : threads)
@@ -54,17 +54,16 @@ void watch_directories()
             
             seen_audio_files.insert(file.path());
 
-            if (is_regular_file(file.status()))
-            {
-                //cout << "\nNew audio detected: " << file.path();  
-                // Send the new audio file to the transcriber.
-                string command = "python3 /home/corey/scannerbot/src/transcriber.py \"";
-                command += file.path();
-                command += "\"";
-                //command += " > /dev/null";
-                int trans_ret_status = system(command.c_str());
-                
-            }
+            if (not is_regular_file(file.status()))
+                continue;
+
+            //cout << "\nNew audio detected: " << file.path();  
+            // Send the new audio file to the transcriber.
+            string command = "python3 /home/corey/scannerbot/src/transcriber.py \"";
+            command += file.path();
+            command += "\"";
+            //command += " > /dev/null";
+            int trans_ret_status = system(command.c_str());
         }
 
         // Handle new transcripts.
@@ -76,13 +75,12 @@ void watch_directories()
 
             seen_transcript_files.insert(file.path());
 
-            if (is_regular_file(file.status()))
-            {
-                cout << "\nNew transcript detected: " << file.path();  
-                // Send the new transcript file to the publisher.
-            }
-        }
+            if (not is_regular_file(file.status()))
+                continue;
 
+            cout << "\nNew transcript detected: " << file.path();  
+            // Send the new transcript file to the publisher.
+        }
 
         std::this_thread::sleep_for(std::chrono::seconds(5));
     }
@@ -91,11 +89,13 @@ void watch_directories()
 int main()
 {
     try {
-        cout << "\nEntering main...";
         signal(SIGINT, signalHandler);
+
         threads.push_back(new thread(watch_directories));
+        
         for (thread * t : threads)
-            t->join();
+            if (t->joinable())
+                t->join();
     }
     catch (std::exception e) {
         cout << '\n' <<e.what() ;
