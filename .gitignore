@@ -134,11 +134,22 @@ dmypy.json
 __pycache__
 
 # Sound files
-*.wav
+/audio/
 *.mp3
+
+# Demo
+/demo/
+
+# Transcripts
+/transcripts/
 
 # API keys
 keys.*
+.env
+/secret/*
 
 # Binaries
 /bin/
+
+# Scripts
+killstopped.sh
