@@ -1,3 +1,10 @@
+
+<pre>
+                  / __/______ ____  ___  ___ ____/ /  ___  / /_
+                 _\ \/ __/ _ `/ _ \/ _ \/ -_) __/ _ \/ _ \/ __/
+                /___/\__/\_,_/_//_/_//_/\__/_/ /_.__/\___/\__/ 
+</pre>
+
 # [scannerbot](https://twitter.com/sdscannerbot)
 
 Scannerbot transcribes radio transmissions and publishes them to social media.
