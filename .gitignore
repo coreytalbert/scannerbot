@@ -153,3 +153,6 @@ keys.*
 
 # Scripts
 killstopped.sh
+
+# Object files
+*.o
