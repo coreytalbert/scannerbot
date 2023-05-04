@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++20 -g -Wall -Wextra -pedantic -O3 -pthread
+CXXFLAGS = -std=c++20 -g -Wall -Wextra -pedantic -pthread
 
 SCANNERBOT_EXEC = bin/scannerbot
 SCANNERBOT_SRCS = src/bus.cpp
@@ -10,17 +10,20 @@ RECORDER_SRCS = src/recorder.cpp
 RECORDER_OBJS := $(RECORDER_SRCS:.cpp=.o)
 
 all: $(SCANNERBOT_EXEC) $(RECORDER_EXEC)
+	@$(MAKE) clean
 
-$(RECORDER_EXEC): $(RECORDER_OBJS)
+bin:
+	mkdir -p bin
+
+$(RECORDER_EXEC): $(RECORDER_OBJS) | bin
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
-$(SCANNERBOT_EXEC): $(SCANNERBOT_OBJS)
+$(SCANNERBOT_EXEC): $(SCANNERBOT_OBJS) | bin
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
-# Object files
 obj/%.o: src/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-.PHONY:
+.PHONY: clean
 clean:
-	rm -f $(SCANNERBOT_OBJS) $(RECORDER_OBJS) $(SCANNERBOT_EXEC) $(RECORDER_EXEC)
+	rm -f src/*.o

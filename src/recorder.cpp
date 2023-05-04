@@ -1,30 +1,18 @@
 #include <iostream>
-#include <vector>
-#include <unordered_map>
 #include <string>
 #include <unistd.h>
+#include <unordered_map>
+#include <vector>
+#include <signal.h>
 using std::cout;
 
 /*signal handler*/
-/*
-void signalHandler(int signum)
-{
-    cout << "\nInterrupt signal (" << signum << ") received.\n";
-    shutdown = true;
-    do_watch = false;
-
-    for (auto &[function, thread] : threadMap)
-        if (thread.joinable())
-            thread.join();
-
-    exit(signum);
-}
-*/
 
 int main(int argc, char *argv[])
 {
+
     cout << "\nThe recorder is running!";
-    
+
     /*
     // Parse command line
     std::unordered_map<char, std::vector<std::string>> options;

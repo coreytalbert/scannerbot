@@ -1,60 +1,72 @@
 #include <atomic>
-#include <cstring>
 #include <chrono>
-#include <exception>
-#include <iostream>
-#include <filesystem>
 #include <csignal>
-#include <thread>
+#include <cstring>
+#include <exception>
+#include <filesystem>
+#include <iostream>
 #include <mutex>
-#include <unordered_set>
-#include <unordered_map>
-#include <vector>
-#include <queue>
-#include <functional>
 #include <spawn.h>
-#include <sys/wait.h>
 #include <sstream>
+#include <sys/wait.h>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
 using std::cin;
 using std::cout;
-using std::function;
 using std::string;
 using std::thread;
 using std::unordered_set;
 using std::vector;
-using std::filesystem::directory_entry;
-using std::filesystem::directory_iterator;
-using std::filesystem::is_regular_file;
-using std::filesystem::path;
-using std::this_thread::get_id;
+using namespace std::this_thread;
+using namespace std::chrono;
+using namespace std::filesystem;
 
 const path audio_dir("/home/corey/scannerbot/audio");
 const path transcript_dir("/home/corey/scannerbot/transcripts/");
 
+// Signals that the user has requested to quit the program
 std::atomic<bool> shutdown = false;
+// Controls the watch_directories loop
 std::atomic<bool> do_watch;
-std::unordered_map<string, thread> threadMap;
+
+// A map relating function names to the threads running them
+std::unordered_map<string, thread *> threadMap;
+// Use this mutex to lock the threadMap
 std::mutex threadMapMutex;
 
+// The process ID of the running recorder program, if any. Set to -1 if not
 pid_t recorder_pid = -1;
 
-void signalHandler(int signum)
+std::stringstream input_line_stream;
+
+void kill_recorder();
+void interruptHandler();
+void watch_directories();
+void run_recorder();
+void run_cli();
+
+void interruptHandler(int signum)
 {
     cout << '\n'
          << getpid() << " received interrupt signal (" << signum << ").\n";
     shutdown = true;
     do_watch = false;
 
+    kill_recorder();
+
     for (auto &[function, thread] : threadMap)
-        if (thread.joinable())
-            thread.join();
+        if (thread->joinable())
+            thread->join();
 
     exit(signum);
 }
 
 void kill_recorder()
 {
-    if (recorder_pid != -1)
+    if (recorder_pid == -1)
         return;
 
     if (kill(recorder_pid, SIGTERM) == -1)
@@ -68,8 +80,19 @@ void kill_recorder()
     recorder_pid = -1;
 }
 
-void run_recorder(char **recorder_args)
+void run_recorder()
 {
+    // Repack command line args for posix_spawn
+    char **recorder_args = new char *[20];
+    string arg;
+    for (int i = 0; input_line_stream >> arg and i < 20; ++i)
+    {
+        recorder_args[i] = new char[arg.length() + 1];
+        strcpy(recorder_args[i], arg.c_str());
+        cout << recorder_args[i] << ' ';
+    }
+    cout << '\n';
+
     // Terminate any existing recorder process
     kill_recorder();
 
@@ -92,12 +115,85 @@ void run_recorder(char **recorder_args)
         waitpid(recorder_pid, &status, 0);
         if (WIFEXITED(status))
         {
-            cout << "\nRecorder exited with status " << WEXITSTATUS(status) << '\n';
+            cout << "\nRecorder exited with status " << WEXITSTATUS(status);
         }
         else
         {
             cout << "\nChild process did not exit normally";
         }
+    }
+    cout << "\nEnd of run_recorder";
+}
+
+void run_cli()
+{
+    string input_line_str;
+    string command;
+    cout << "scannerbot> ";
+
+    while (not shutdown and getline(cin, input_line_str))
+    {
+        command.clear();
+
+        input_line_stream.str(input_line_str);
+        input_line_stream >> command;
+        cout << "command: " << command << "\nargs: ";
+
+        if (command == "start")
+        {
+            std::lock_guard<std::mutex> lock(threadMapMutex);
+
+            if (threadMap.count("run_recorder") == 0)
+                threadMap["run_recorder"] = new thread(run_recorder);
+
+            do_watch = true; // Enable forever directory watcher loop
+            if (threadMap.count("watch_directories") == 0)
+                threadMap["watch_directories"] = new thread(watch_directories);
+        }
+
+        else if (command == "stop")
+        {
+            std::lock_guard<std::mutex> lock(threadMapMutex);
+
+            kill_recorder();
+            if (threadMap["run_recorder"]->joinable())
+                threadMap["run_recorder"]->join();
+            threadMap.erase("run_recorder");
+
+            do_watch = false;
+            if (threadMap["watch_directories"]->joinable())
+                threadMap["watch_directories"]->join();
+            threadMap.erase("watch_directories");
+        }
+
+        else if (command == "gain")
+        {
+        }
+
+        else if (command == "frequency")
+        {
+        }
+
+        else if (command == "quiet")
+        {
+        }
+
+        else if (command == "verbose")
+        {
+        }
+
+        else if (command == "quit")
+        {
+            shutdown = true;
+            do_watch = false;
+        }
+
+        else
+        {
+            std::cout << "\nNo such option.\n";
+        }
+
+        std::cout << "scannerbot> ";
     }
 }
 
@@ -120,12 +216,13 @@ void watch_directories()
                 continue;
 
             // Wait 10 seconds since last write to transcribe file.
-            auto min_wait_s = std::chrono::seconds(120);
-            auto time_now = std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::system_clock::now().time_since_epoch());
+
+            auto min_wait_s = 30s;
+            // std::this_thread::sleep_for(min_wait_s);
+            auto time_now =
+                duration_cast<seconds>(system_clock::now().time_since_epoch());
             auto last_file_write_time =
-                std::chrono::duration_cast<std::chrono::seconds>(
-                    std::filesystem::last_write_time(file).time_since_epoch());
+                duration_cast<seconds>(last_write_time(file).time_since_epoch());
 
             if ((time_now - last_file_write_time) < min_wait_s)
                 continue;
@@ -174,96 +271,40 @@ void watch_directories()
             [[maybe_unused]] int pub_ret_status = system(command.c_str());
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(5));
-    }
-}
-
-void run_cli()
-{
-    string input_line_str;
-    std::stringstream input_line_stream;
-    string command;
-    cout << "scannerbot> ";
-
-    while (not shutdown and getline(cin, input_line_str))
-    {
-        input_line_stream.str(input_line_str);
-        input_line_stream >> command;
-        cout << "command: " << command << "\nargs: ";
-
-        if (command == "start")
-        {
-            // Repack command line args for posix_spawn
-            char **recorder_args = new char *[20];
-            string arg;
-            for (int i = 0; input_line_stream >> arg and i < 20; ++i)
-            {
-                recorder_args[i] = new char[arg.length() + 1];
-                strcpy(recorder_args[i], arg.c_str());
-                cout << recorder_args[i] << ' ';
-            }
-            cout << '\n';
-
-            std::lock_guard<std::mutex> lock(threadMapMutex);
-
-            if (threadMap.count("run_recorder") == 0)
-                threadMap["run_recorder"] = thread(run_recorder, recorder_args);
-
-            do_watch = true; // Enable forever directory watcher loop
-            if (threadMap.count("watch_directories") == 0)
-                threadMap["watch_directories"] = thread(watch_directories);
-        }
-
-        else if (command == "stop")
-        {
-            do_watch = false;
-
-            std::lock_guard<std::mutex> lock(threadMapMutex);
-
-            threadMap["run_recorder"].detach();
-            threadMap["watch_directories"].detach();
-            threadMap.erase("run_recorder");
-            threadMap.erase("watch_directories");
-        }
-
-        else if (command == "gain")
-        {
-        }
-
-        else if (command == "frequency")
-        {
-        }
-
-        else if (command == "quiet")
-        {
-        }
-
-        else if (command == "verbose")
-        {
-        }
-
-        else
-        {
-            std::cout << "\nNo such option.\n";
-        }
-
-        std::cout << "scannerbot> ";
+        sleep_for(5s);
     }
 }
 
 int main()
 {
+    cout << '\n';
+    cout << R"(   ____                           __        __ )" << '\n';
+    cout << R"(  / __/______ ____  ___  ___ ____/ /  ___  / /_)" << '\n';
+    cout << R"( _\ \/ __/ _ `/ _ \/ _ \/ -_) __/ _ \/ _ \/ __/)" << '\n';
+    cout << R"(/___/\__/\_,_/_//_/_//_/\__/_/ /_.__/\___/\__/ )"
+         << "\n\n\n";
+
+    cout << R"(    An experiment in software engineering by   )" << '\n';
+    cout << R"(                Citlally Gomez                 )" << '\n';
+    cout << R"(                  Kailyn King                  )" << '\n';
+    cout << R"(                   Andrew Le                   )" << '\n';
+    cout << R"(                 Corey Talbert                 )"
+         << "\n\n";
+
     try
     {
-        signal(SIGINT, signalHandler);
+        signal(SIGINT, interruptHandler);
 
-        std::unique_lock<std::mutex> lock(threadMapMutex);
-        threadMap["run_cli"] = thread(run_cli);
-        lock.unlock();
+        // Start the scanner bot command line interface
+        run_cli();
+
+        while (not shutdown)
+        {
+        }
 
         for (auto &[function, thread] : threadMap)
-            if (thread.joinable())
-                thread.join();
+            if (thread->joinable())
+                thread->join();
     }
     catch (std::exception e)
     {
