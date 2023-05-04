@@ -1,18 +1,55 @@
+#include <fcntl.h>
 #include <iostream>
+#include <mqueue.h>
+#include <signal.h>
 #include <string>
 #include <unistd.h>
 #include <unordered_map>
 #include <vector>
-#include <signal.h>
+#include <sys/wait.h>
+
 using std::cout;
+
+// The name of the recorder posix message queue
+const char *REC_MQ_NAME = "/sb_rec_inbox";
+const char *BUS_MQ_NAME = "/sb_bus_inbox";
+// Map of posix message queue names to their file descriptors
+std::unordered_map<const char *, mqd_t> mqdMap;
+
+void mq_init()
+{
+    // Connect to the bus inbox for sending messages to the bus
+    mqdMap[BUS_MQ_NAME] = mq_open(BUS_MQ_NAME, O_WRONLY);
+    if (mqdMap[BUS_MQ_NAME] == -1)
+    {
+        perror("bus inbox mq_open");
+        exit(EXIT_FAILURE);
+    }
+
+    // Connect to the recorder inbox for reading messages from the bus
+    mqdMap[REC_MQ_NAME] = mq_open(REC_MQ_NAME, O_RDONLY);
+    if (mqdMap[REC_MQ_NAME] == -1)
+    {
+        perror("recorder inbox mq_open");
+        exit(EXIT_FAILURE);
+    }
+}
 
 /*signal handler*/
 
-int main(int argc, char *argv[])
+int main()
 {
 
+    mq_init();
     cout << "\nThe recorder is running!";
+    char message[256];
+    mq_receive(mqdMap[REC_MQ_NAME], message, sizeof(message), nullptr);
+    cout << message;
 
+    for (auto &[queue_name, mqd] : mqdMap)
+    {
+        mq_close(mqd);
+    }
     /*
     // Parse command line
     std::unordered_map<char, std::vector<std::string>> options;
