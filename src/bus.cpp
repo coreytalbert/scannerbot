@@ -47,6 +47,7 @@ void interruptHandler();
 void watch_directories();
 void run_recorder();
 void run_cli();
+void show_help();
 
 void interruptHandler(int signum)
 {
@@ -125,6 +126,17 @@ void run_recorder()
     cout << "\nEnd of run_recorder";
 }
 
+void show_help()
+{
+    cout << R"(Scannerbot commands:                           )" << '\n'
+         << R"(    s   start   Begin recording transmissions  )" << '\n'
+         << R"(        stop    Stop the recording process     )" << '\n'
+         << R"(    q   quit    Stop scannerbot and exit       )" << '\n'
+         << R"(    h   help    Show this list of commands     )"
+         << "\n\n"
+         << std::endl;
+}
+
 void run_cli()
 {
     string input_line_str;
@@ -139,7 +151,7 @@ void run_cli()
         input_line_stream >> command;
         cout << "command: " << command << "\nargs: ";
 
-        if (command == "start")
+        if (command == "start" or command == "s")
         {
             std::lock_guard<std::mutex> lock(threadMapMutex);
 
@@ -182,10 +194,15 @@ void run_cli()
         {
         }
 
-        else if (command == "quit")
+        else if (command == "quit" or command == "q")
         {
             shutdown = true;
             do_watch = false;
+        }
+
+        else if (command == "help" or command == "h")
+        {
+            show_help();
         }
 
         else
@@ -277,19 +294,19 @@ void watch_directories()
 
 int main()
 {
-    cout << '\n';
-    cout << R"(   ____                           __        __ )" << '\n';
-    cout << R"(  / __/______ ____  ___  ___ ____/ /  ___  / /_)" << '\n';
-    cout << R"( _\ \/ __/ _ `/ _ \/ _ \/ -_) __/ _ \/ _ \/ __/)" << '\n';
-    cout << R"(/___/\__/\_,_/_//_/_//_/\__/_/ /_.__/\___/\__/ )"
-         << "\n\n\n";
+    cout << '\n'
+         << R"(   ____                           __        __ )" << '\n'
+         << R"(  / __/______  ___  ___  ___ ____/ /  ___  / /_)" << '\n'
+         << R"( _\ \/ __/ _ `/ _ \/ _ \/ -_) __/ _ \/ _ \/ __/)" << '\n'
+         << R"(/___/\__/\_,_/_//_/_//_/\__/_/ /_.__/\___/\__/ )" << '\n'
+         << std::endl;
 
-    cout << R"(    An experiment in software engineering by   )" << '\n';
-    cout << R"(                Citlally Gomez                 )" << '\n';
-    cout << R"(                  Kailyn King                  )" << '\n';
-    cout << R"(                   Andrew Le                   )" << '\n';
-    cout << R"(                 Corey Talbert                 )"
-         << "\n\n";
+    cout << R"(    An experiment in software engineering by   )" << '\n'
+         << R"(         Citlally Gomez  Corey Talbert         )" << '\n'
+         << R"(            Kailyn King  Andrew Le             )" << '\n'
+         << std::endl;
+
+    show_help();
 
     try
     {
@@ -312,5 +329,6 @@ int main()
              << e.what();
         exit(1);
     }
+
     return 0;
 }
