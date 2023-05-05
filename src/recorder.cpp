@@ -1,20 +1,61 @@
+#include <atomic>
+#include <cstring>
 #include <fcntl.h>
 #include <iostream>
 #include <mqueue.h>
+#include <mutex>
 #include <signal.h>
+#include <spawn.h>
 #include <string>
+#include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 #include <unordered_map>
 #include <vector>
-#include <sys/wait.h>
 
 using std::cout;
+using std::mutex;
+using std::string;
+using std::thread;
+using std::unordered_map;
+using std::vector;
+
+// Signals that the user has requested to quit the program
+std::atomic<bool> do_shutdown = false;
+
+// A map relating function names to the threads running them
+unordered_map<string, thread *> threadMap;
+// Use this mutex to lock the threadMap
+mutex threadMapMutex;
 
 // The name of the recorder posix message queue
 const char *REC_MQ_NAME = "/sb_rec_inbox";
 const char *BUS_MQ_NAME = "/sb_bus_inbox";
 // Map of posix message queue names to their file descriptors
-std::unordered_map<const char *, mqd_t> mqdMap;
+unordered_map<const char *, mqd_t> mqdMap;
+
+// Map of rtl_fm options and their arguments
+unordered_map<string, string> radioOptions;
+
+// The process ID of the running recorder shell, if any. Set to -1 if not
+pid_t rec_shell_pid = -1;
+
+void mq_init();
+void mq_watcher();
+void cleanup();
+void kill_rec_shell();
+
+void cleanup()
+{
+    // Close connection to message queues
+    for (auto &[queue_name, mqd] : mqdMap)
+        mq_close(mqd);
+
+    // Clean up threads
+    for (auto &[function, thread] : threadMap)
+        if (thread->joinable())
+            thread->join();
+}
 
 void mq_init()
 {
@@ -35,21 +76,106 @@ void mq_init()
     }
 }
 
-/*signal handler*/
+void mq_watcher()
+{
+    while (not do_shutdown)
+    {
+        cout << "\nThe recorder is watching the message queue.";
+        char message[256] = {""};
+        // mq_receive blocks until there's something in the queue
+        mq_receive(mqdMap[REC_MQ_NAME], message, sizeof(message), nullptr);
+        cout << "\nmessage: " << message;
+
+        if (message[0] == '\0')
+            continue; // Empty message.
+
+        char *command;
+        char *option;
+        char *arg;
+
+        // Parse message into command, options, and arguments
+        command = strtok(message, " ");
+        cout << "\ncommand: " << command;
+        string valid_options = "fgMsrl";
+        while ((option = strtok(nullptr, " ")) != nullptr)
+        {
+            arg = strtok(nullptr, " ");
+            if (sizeof(option) == 2 and valid_options.find(option) != string::npos)
+            {
+                radioOptions[option] = arg;
+            }
+        }
+
+        char **radio_args = new char *[radioOptions.size()];
+        int i = 0;
+        for (auto &[opt, arg] : radioOptions)
+        {
+            string opt_arg = '-' + opt + ' ' + arg;
+            strcpy(radio_args[i], opt_arg.c_str());
+            i++;
+        }
+
+        if (strcmp(command, "start") == 0)
+        {
+            cout << "\nReceived command \"start\"";
+            // Terminate existing recorder shell
+            kill_rec_shell();
+
+            // Start new rtl_fm process using supplied arguments, if any
+            int spawn_err = posix_spawn(&rec_shell_pid,
+                                        "/home/corey/scannerbot/src/recorder.sh",
+                                        nullptr, nullptr, radio_args, nullptr);
+            // Error
+            if (spawn_err != 0)
+            {
+                perror("\nError starting recorder\n");
+                exit(EXIT_FAILURE);
+            }
+        }
+        else if (strcmp(command, "freq") == 0)
+        {
+        }
+        else if (strcmp(command, "gain") == 0)
+        {
+        }
+        else if (strcmp(command, "squelch") == 0)
+        {
+        }
+        else
+        {
+            cout << "\nNot a command.";
+        }
+    }
+}
+
+void kill_rec_shell()
+{
+    if (rec_shell_pid == -1)
+        return;
+
+    // Kill entire recorder process group
+    if (kill(rec_shell_pid, SIGTERM) == -1)
+    {
+        perror("Unable to kill recorder shell script.");
+        exit(EXIT_FAILURE);
+    }
+
+    cout << "\nRecorder shell script [PID " << rec_shell_pid << "] killed.";
+
+    rec_shell_pid = -1;
+}
 
 int main()
 {
 
     mq_init();
+    threadMap["mq_watcher"] = new thread(mq_watcher);
     cout << "\nThe recorder is running!";
-    char message[256];
-    mq_receive(mqdMap[REC_MQ_NAME], message, sizeof(message), nullptr);
-    cout << message;
 
-    for (auto &[queue_name, mqd] : mqdMap)
-    {
-        mq_close(mqd);
-    }
+    while (not do_shutdown)
+        ;
+
+    cleanup();
     /*
     // Parse command line
     std::unordered_map<char, std::vector<std::string>> options;
