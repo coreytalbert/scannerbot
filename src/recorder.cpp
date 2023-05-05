@@ -100,18 +100,24 @@ void mq_watcher()
         while ((option = strtok(nullptr, " ")) != nullptr)
         {
             arg = strtok(nullptr, " ");
-            if (sizeof(option) == 2 and valid_options.find(option) != string::npos)
+            if (valid_options.find(option) != string::npos)
             {
                 radioOptions[option] = arg;
             }
+
+            // cout << "\nmap size: " << radioOptions.size() << " option: "
+            //      << option << " arg: " << radioOptions[option]; // wtf
         }
 
         char **radio_args = new char *[radioOptions.size()];
         int i = 0;
         for (auto &[opt, arg] : radioOptions)
         {
+            radio_args[i] = new char[16];
             string opt_arg = '-' + opt + ' ' + arg;
             strcpy(radio_args[i], opt_arg.c_str());
+            cout << '\n'
+                 << radio_args[i];
             i++;
         }
 
