@@ -4,6 +4,7 @@
 #include <cstring>
 #include <exception>
 #include <fcntl.h>
+#include <filesystem>
 #include <iostream>
 #include <mqueue.h>
 #include <mutex>
@@ -13,16 +14,23 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 using std::cin;
 using std::cout;
 using std::string;
 using std::thread;
+using std::unordered_set;
 using namespace std::this_thread;
 using namespace std::chrono;
+using namespace std::filesystem;
+
+const path audio_dir("/home/corey/scannerbot/audio");
+const path transcript_dir("/home/corey/scannerbot/transcripts/");
 
 // Signals that the user has requested to quit the program
 std::atomic<bool> do_shutdown = false;
+std::atomic<bool> do_watch = false;
 
 // A map relating function names to the threads running them
 std::unordered_map<string, thread *> threadMap;
@@ -40,17 +48,19 @@ const char *BUS_MQ_NAME = "/sb_bus_inbox";
 // Map of posix message queue names to their file descriptors
 std::unordered_map<const char *, mqd_t> mqdMap;
 
-void kill_recorder();
-void interruptHandler();
-void run_recorder(string);
-void run_cli();
-void show_help();
-void mq_init();
 void cleanup();
+void interruptHandler();
+void kill_recorder();
+void mq_init();
+void run_cli();
+void run_recorder(string);
+void show_help();
+void watch_directories();
 
 void cleanup()
 {
     kill_recorder();
+    do_watch = false;
 
     // Clean up message queues
     for (auto &[queue_name, mqd] : mqdMap)
@@ -97,7 +107,7 @@ void run_recorder(string args)
 {
     // Terminate any existing recorder process
     kill_recorder();
-    char ** recorder_args = new char*[20];
+    char **recorder_args = new char *[20];
     // auto file_actions = posix_spawn_file_actions_init();
     int spawn_err = posix_spawn(&recorder_pid,
                                 "/home/corey/scannerbot/bin/recorder",
@@ -108,7 +118,7 @@ void run_recorder(string args)
         perror("\nError starting recorder\n");
         exit(EXIT_FAILURE);
     }
-    
+
     // Send command to recorder process
     mq_send(mqdMap[REC_MQ_NAME], args.c_str(), sizeof(args), 0);
 
@@ -116,15 +126,83 @@ void run_recorder(string args)
     int status;
     waitpid(recorder_pid, &status, 0);
     if (WIFEXITED(status))
-    {
         cout << "\nRecorder exited with status " << WEXITSTATUS(status);
-    }
     else
-    {
-        cout << "\nChild process did not exit normally";
-    }
+        cout << "\nRecorder did not exit normally";
 
     cout << "\nEnd of run_recorder";
+}
+
+void watch_directories()
+{
+    unordered_set<string> seen_audio_files;
+    unordered_set<string> seen_transcript_files;
+
+    while (not do_shutdown and do_watch)
+    {
+        //  Handle new audio files.
+        for (auto &file : directory_iterator(audio_dir))
+        {
+            //  The file is already in the set.
+            if (seen_audio_files.count(file.path()) > 0)
+                continue;
+
+            // Wait 10 seconds since last write to transcribe file.
+            auto min_wait_s = 30s;
+            // std::this_thread::sleep_for(min_wait_s);
+            auto time_now =
+                duration_cast<seconds>(system_clock::now().time_since_epoch());
+            auto last_file_write_time =
+                duration_cast<seconds>(last_write_time(file).time_since_epoch());
+
+            if ((time_now - last_file_write_time) < min_wait_s)
+                continue;
+
+            // The file is too small to bother with.
+            if (file.file_size() < 4096)
+                continue;
+
+            seen_audio_files.insert(file.path());
+
+            // The file isn't audio.
+            if (not is_regular_file(file.status()))
+                continue;
+
+            // cout << "\nNew audio detected: " << file.path();
+            //  Send the new audio file to the transcriber.
+            string command = "python3 /home/corey/scannerbot/src/transcriber.py \"";
+            command += file.path();
+            command += "\"";
+            command += " > /dev/null";
+            [[maybe_unused]] int trans_ret_status = system(command.c_str());
+        }
+
+        // Handle new transcripts.
+        for (auto &file : directory_iterator(transcript_dir))
+        {
+            if (seen_transcript_files.count(file.path()) > 0)
+                continue;
+
+            // The file is too small to bother with.
+            if (file.file_size() < 16)
+                continue;
+
+            seen_transcript_files.insert(file.path());
+
+            if (not is_regular_file(file.status()))
+                continue;
+
+            cout << "\nNew transcript detected: " << file.path();
+            // Send the new transcript file to the publisher.
+            string command = "python3 /home/corey/scannerbot/src/publisher.py \"";
+            command += file.path();
+            command += "\"";
+            command += " > /dev/null";
+            [[maybe_unused]] int pub_ret_status = system(command.c_str());
+        }
+
+        sleep_for(5s);
+    }
 }
 
 void show_help()
@@ -136,8 +214,7 @@ void show_help()
          << R"(    h   help      Show this list of commands   )" << '\n'
          << R"(    f   freq      Set radio frequency          )" << '\n'
          << R"(    g   gain      Set radio gain               )" << '\n'
-         << R"(        squelch   Set radio quelch             )" << '\n'
-         << "\n"
+         << R"(    l   squelch   Set radio quelch             )"
          << std::endl;
 }
 
@@ -145,7 +222,7 @@ void run_cli()
 {
     string input_line_str;
     string command;
-    cout << "scannerbot> ";
+    cout << "\nscannerbot> ";
 
     while (not do_shutdown and getline(cin, input_line_str))
     {
@@ -161,6 +238,10 @@ void run_cli()
 
             if (threadMap.count("run_recorder") == 0)
                 threadMap["run_recorder"] = new thread(run_recorder, input_line_str);
+            
+            do_watch = true;
+            if (threadMap.count("watch_directories") == 0)
+                threadMap["watch_directories"] = new thread(watch_directories);
         }
 
         else if (command == "stop")
@@ -171,13 +252,18 @@ void run_cli()
             if (threadMap["run_recorder"]->joinable())
                 threadMap["run_recorder"]->join();
             threadMap.erase("run_recorder");
+
+            do_watch = false;
+            if (threadMap["watch_directories"]->joinable())
+                threadMap["watch_directories"]->join();
+            threadMap.erase("watch_directories");
         }
 
-        else if (command == "gain")
+        else if (command == "gain" or command == "g")
         {
         }
 
-        else if (command == "frequency")
+        else if (command == "frequency" or command == "freq" or command == "f")
         {
         }
 
@@ -197,7 +283,8 @@ void run_cli()
             std::cout << "\nNo such option.\n";
         }
 
-        std::cout << "scannerbot> ";
+        sleep_for(250ms);
+        cout << "\nscannerbot> ";
     }
 }
 

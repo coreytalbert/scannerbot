@@ -80,76 +80,90 @@ void mq_watcher()
 {
     while (not do_shutdown)
     {
-        cout << "\nThe recorder is watching the message queue.";
+        // Get next command from the command line interface
         char message[256] = {""};
         // mq_receive blocks until there's something in the queue
         mq_receive(mqdMap[REC_MQ_NAME], message, sizeof(message), nullptr);
-        cout << "\nmessage: " << message;
-
         if (message[0] == '\0')
             continue; // Empty message.
 
-        char *command;
-        char *option;
-        char *arg;
-
-        // Parse message into command, options, and arguments
+        // Parse message into command and radio options map
+        char *command, *option, *arg;
         command = strtok(message, " ");
-        cout << "\ncommand: " << command;
-        string valid_options = "fgMsrl";
-        while ((option = strtok(nullptr, " ")) != nullptr)
-        {
-            arg = strtok(nullptr, " ");
-            if (valid_options.find(option) != string::npos)
-            {
-                radioOptions[option] = arg;
-            }
 
-            // cout << "\nmap size: " << radioOptions.size() << " option: "
-            //      << option << " arg: " << radioOptions[option]; // wtf
+        if (strcmp(command, "start") == 0)
+        {
+            string valid_options = "fgsrl";
+            while ((option = strtok(nullptr, " ")) != nullptr)
+            {
+                arg = strtok(nullptr, " ");
+                if (valid_options.find(option) != string::npos)
+                    radioOptions[option] = arg;
+            }
         }
 
-        char **radio_args = new char *[radioOptions.size()];
-        int i = 0;
-        for (auto &[opt, arg] : radioOptions)
+        else if (strcmp(command, "freq") == 0)
+        {
+            strcpy(option,"f");
+            if ((arg = strtok(nullptr, " ")) == nullptr)
+            {
+                cout << "\nMissing argument.";
+                continue;
+            }
+            radioOptions["f"] = arg;
+        }
+
+        else if (strcmp(command, "gain") == 0)
+        {
+            strcpy(option,"g");
+            if ((arg = strtok(nullptr, " ")) == nullptr)
+            {
+                cout << "\nMissing argument.";
+                continue;
+            }
+            radioOptions["g"] = arg;
+        }
+
+        else if (strcmp(command, "squelch") == 0)
+        {
+            strcpy(option,"l");
+            if ((arg = strtok(nullptr, " ")) == nullptr)
+            {
+                cout << "\nMissing argument.";
+                continue;
+            }
+            radioOptions["l"] = arg;
+        }
+        
+        else
+        {
+            cout << "\nNot a command.";
+            continue;
+        }
+
+        // Place options/args into char* array for passing to spawn
+        char **radio_args = new char *[radioOptions.size() + 1];
+        radio_args[0] = new char[0]; // arg 0 is skipped by getopts in the bash script
+        for (int i = 1; auto &[opt, arg] : radioOptions)
         {
             radio_args[i] = new char[16];
             string opt_arg = '-' + opt + ' ' + arg;
             strcpy(radio_args[i], opt_arg.c_str());
-            cout << '\n'
-                 << radio_args[i];
             i++;
         }
 
-        if (strcmp(command, "start") == 0)
-        {
-            cout << "\nReceived command \"start\"";
-            // Terminate existing recorder shell
-            kill_rec_shell();
+        // Terminate existing recorder shell
+        kill_rec_shell();
 
-            // Start new rtl_fm process using supplied arguments, if any
-            int spawn_err = posix_spawn(&rec_shell_pid,
-                                        "/home/corey/scannerbot/src/recorder.sh",
-                                        nullptr, nullptr, radio_args, nullptr);
-            // Error
-            if (spawn_err != 0)
-            {
-                perror("\nError starting recorder\n");
-                exit(EXIT_FAILURE);
-            }
-        }
-        else if (strcmp(command, "freq") == 0)
+        // Start new rtl_fm process using supplied arguments, if any
+        int spawn_err = posix_spawn(&rec_shell_pid,
+                                    "/home/corey/scannerbot/src/recorder.sh",
+                                    nullptr, nullptr, radio_args, nullptr);
+        // Error
+        if (spawn_err != 0)
         {
-        }
-        else if (strcmp(command, "gain") == 0)
-        {
-        }
-        else if (strcmp(command, "squelch") == 0)
-        {
-        }
-        else
-        {
-            cout << "\nNot a command.";
+            perror("\nError starting recorder\n");
+            exit(EXIT_FAILURE);
         }
     }
 }
