@@ -1,9 +1,12 @@
 CXX = g++
-CXXFLAGS = -std=c++20 -g -Wall -Wextra -pedantic -pthread
+CXXFLAGS = -std=c++20 -g -Wall -Wextra -pedantic -lpthread -ldl
 
 SCANNERBOT_EXEC = bin/scannerbot
-SCANNERBOT_SRCS = src/bus.cpp
-SCANNERBOT_OBJS := $(SCANNERBOT_SRCS:.cpp=.o)
+SCANNERBOT_CPP_SRCS = src/bus.cpp 
+SCANNERBOT_CPP_OBJS := $(SCANNERBOT_CPP_SRCS:.cpp=.o)
+SCANNERBOT_C_SRCS = src/sqlite3.c 
+SCANNERBOT_C_OBJS := $(SCANNERBOT_C_SRCS:.c=.o)
+
 
 RECORDER_EXEC = bin/recorder
 RECORDER_SRCS = src/recorder.cpp
@@ -18,8 +21,11 @@ dirs:
 $(RECORDER_EXEC): $(RECORDER_OBJS) | dirs
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
-$(SCANNERBOT_EXEC): $(SCANNERBOT_OBJS) | dirs
+$(SCANNERBOT_EXEC): $(SCANNERBOT_CPP_OBJS) $(SCANNERBOT_C_OBJS) | dirs
 	$(CXX) $(CXXFLAGS) -o $@ $^
+
+obj/%.o: src/%.c
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 obj/%.o: src/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
