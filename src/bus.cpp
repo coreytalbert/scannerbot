@@ -8,6 +8,7 @@
 #include <iostream>
 #include <mqueue.h>
 #include <mutex>
+#include <ncurses.h>
 #include <spawn.h>
 #include <sstream>
 #include <sys/stat.h>
@@ -220,14 +221,31 @@ void show_help()
 
 void run_cli()
 {
+	initscr(); // initialize ncurses
+	keypad(stdscr, true); // special keys
+	cbreak(); // hide line buffering
+	curs_set(0); // hide cursor
+	
+	// define terminal appearance
+	int width, height;
+	getmaxyx(stdscr, width, height);
+	WINDOW* window = newwin(width-1, height, 0, 0);
+	
     string input_line_str;
     string command;
-    cout << "\nscannerbot> ";
+    //cout << "\nscannerbot> ";
 
     while (not do_shutdown and getline(cin, input_line_str))
     {
-        command.clear();
-
+		command.clear();
+		
+		// prompt
+		mvwprintw(window, width02, 0, "scannerbot> ");
+		wrefresh(window);
+	
+		// wgetstr(window, input)
+		// if (strcmp(input, "quit") == 0) {}
+		
         input_line_stream.str(input_line_str);
         input_line_stream >> command;
         cout << "command: " << command << "\nargs: ";
@@ -284,7 +302,7 @@ void run_cli()
         }
 
         sleep_for(250ms);
-        cout << "\nscannerbot> ";
+        //cout << "\nscannerbot> ";
     }
 }
 
