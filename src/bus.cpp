@@ -8,6 +8,7 @@
 #include <iostream>
 #include <mqueue.h>
 #include <mutex>
+#include <ncurses.h>
 #include <spawn.h>
 #include "sqlite3.h"
 #include <sys/stat.h>
