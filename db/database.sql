@@ -1,6 +1,42 @@
--- CREATE TABLE recordings(transmissionID INTEGER NOT NULL, partID INTEGER NOT NULL, Timestamp NOT NULL, Duration INTEGER NOT NULL, Freqs INTEGER NOT NULL, Agency NOT NULL, filePath NOT NULL, fileType NOT NULL, audioRes NOT NULL);
+DROP TABLE recordings;
 
--- INSERT INTO recordings(transmissionID, partID, Timestamp, Duration, Freqs, Agency, filePath, fileType, audioRes)
--- VALUES (1, 1, "00:00", 30, 400, "Test", "Test", "Test", "Test");
+CREATE TABLE IF NOT EXISTS info(
+    id TEXT NOT NULL PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    freq TEXT NOT NULL,
+    agency TEXT,
+    transcript TEXT,
+    audioPath TEXT,
+    audioDuration TEXT,
+    postID TEXT,
+    postURL TEXT
+);
 
-SELECT * FROM recordings;
+INSERT INTO
+    recordings(
+        id,
+        Timestamp,
+        Duration,
+        freq,
+        agency,
+        filePath,
+        fileType,
+        audioRes
+    )
+VALUES
+    (
+        1,
+        1,
+        "00:00",
+        30,
+        400,
+        "Test",
+        "Test",
+        "Test",
+        "Test"
+    );
+
+SELECT
+    *
+FROM
+    recordings;

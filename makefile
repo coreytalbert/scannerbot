@@ -1,5 +1,6 @@
 CXX = g++
-CXXFLAGS = -std=c++20 -g -Wall -Wextra -pedantic -lpthread -ldl
+CXXFLAGS = -std=c++20 -g -Wall -Wextra -pedantic 
+LIB_FLAGS = -lpthread -ldl
 
 SCANNERBOT_EXEC = bin/scannerbot
 SCANNERBOT_CPP_SRCS = src/bus.cpp 
@@ -19,10 +20,10 @@ dirs:
 	mkdir -p bin audio transcripts secret db
 
 $(RECORDER_EXEC): $(RECORDER_OBJS) | dirs
-	$(CXX) $(CXXFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LIB_FLAGS)
 
 $(SCANNERBOT_EXEC): $(SCANNERBOT_CPP_OBJS) $(SCANNERBOT_C_OBJS) | dirs
-	$(CXX) $(CXXFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LIB_FLAGS)
 
 obj/%.o: src/%.c
 	$(CXX) $(CXXFLAGS) -c $< -o $@
