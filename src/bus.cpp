@@ -9,7 +9,7 @@
 #include <mqueue.h>
 #include <mutex>
 #include <spawn.h>
-#include <sstream>
+#include "sqlite3.h"
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <thread>
@@ -25,6 +25,8 @@ using namespace std::this_thread;
 using namespace std::chrono;
 using namespace std::filesystem;
 
+sqlite3 *db;
+
 const path audio_dir("/home/corey/scannerbot/audio");
 const path transcript_dir("/home/corey/scannerbot/transcripts/");
 
@@ -39,8 +41,7 @@ std::mutex threadMapMutex;
 
 // The process ID of the running recorder program, if any. Set to -1 if not
 pid_t recorder_pid = -1;
-
-std::stringstream input_line_stream;
+char * currentfreq = "160.71M";
 
 // The name of the recorder posix message queue
 const char *REC_MQ_NAME = "/sb_rec_inbox";
@@ -49,6 +50,7 @@ const char *BUS_MQ_NAME = "/sb_bus_inbox";
 std::unordered_map<const char *, mqd_t> mqdMap;
 
 void cleanup();
+void db_init();
 void interruptHandler();
 void kill_recorder();
 void mq_init();
@@ -59,6 +61,8 @@ void watch_directories();
 
 void cleanup()
 {
+    sqlite3_close(db);
+
     kill_recorder();
     do_watch = false;
 
@@ -80,6 +84,7 @@ void interruptHandler(int signum)
     cout << '\n'
          << getpid() << " received interrupt signal (" << signum << ").\n";
     do_shutdown = true;
+    do_watch = false;
 
     cleanup();
 
@@ -91,11 +96,19 @@ void kill_recorder()
     if (recorder_pid == -1)
         return;
 
+    // Message the recorder to kill its shell script, if any
+    string sndmsg("quit");
+    if (recorder_pid != -1)
+        mq_send(mqdMap[REC_MQ_NAME], sndmsg.c_str(),
+                sizeof(sndmsg), 0);
+    char *retmsg = new char[64];
+    mq_receive(mqdMap[BUS_MQ_NAME], retmsg, 64, 0);
+    cout << "\n\nRecorder sez: " << retmsg;
+
     // Kill entire recorder process group
     if (kill(recorder_pid, SIGTERM) == -1)
     {
-        perror("Unable to kill recorder.");
-        exit(EXIT_FAILURE);
+        perror("Unable to kill recorder");
     }
 
     cout << "\nRecorder [PID " << recorder_pid << "] killed.";
@@ -129,8 +142,6 @@ void run_recorder(string args)
         cout << "\nRecorder exited with status " << WEXITSTATUS(status);
     else
         cout << "\nRecorder did not exit normally";
-
-    cout << "\nEnd of run_recorder";
 }
 
 void watch_directories()
@@ -168,7 +179,6 @@ void watch_directories()
             if (not is_regular_file(file.status()))
                 continue;
 
-            // cout << "\nNew audio detected: " << file.path();
             //  Send the new audio file to the transcriber.
             string command = "python3 /home/corey/scannerbot/src/transcriber.py \"";
             command += file.path();
@@ -192,7 +202,6 @@ void watch_directories()
             if (not is_regular_file(file.status()))
                 continue;
 
-            cout << "\nNew transcript detected: " << file.path();
             // Send the new transcript file to the publisher.
             string command = "python3 /home/corey/scannerbot/src/publisher.py \"";
             command += file.path();
@@ -207,7 +216,8 @@ void watch_directories()
 
 void show_help()
 {
-    cout << R"(Scannerbot commands:                           )" << '\n'
+    cout << '\n'
+         << R"(Scannerbot commands:                           )" << '\n'
          << R"(    s   start     Begin recording transmissions)" << '\n'
          << R"(        stop      Stop recording               )" << '\n'
          << R"(    q   quit      Stop scannerbot and exit     )" << '\n'
@@ -220,25 +230,27 @@ void show_help()
 
 void run_cli()
 {
-    string input_line_str;
+    string user_input;
     string command;
-    cout << "\nscannerbot> ";
+    string args;
 
-    while (not do_shutdown and getline(cin, input_line_str))
+    while (not do_shutdown)
     {
-        command.clear();
-
-        input_line_stream.str(input_line_str);
-        input_line_stream >> command;
-        cout << "command: " << command << "\nargs: ";
+        // Get user input a parse it
+        cout << "\nscannerbot> ";
+        getline(cin, user_input);
+        command = user_input.substr(0, user_input.find_first_of(' '));
+        args = user_input.substr(user_input.find_first_of(' ') + 1);
 
         if (command == "start" or command == "s")
         {
             std::lock_guard<std::mutex> lock(threadMapMutex);
 
+            // Launch recorder
             if (threadMap.count("run_recorder") == 0)
-                threadMap["run_recorder"] = new thread(run_recorder, input_line_str);
-            
+                threadMap["run_recorder"] = new thread(run_recorder, user_input);
+
+            // Launch directory watchers
             do_watch = true;
             if (threadMap.count("watch_directories") == 0)
                 threadMap["watch_directories"] = new thread(watch_directories);
@@ -261,10 +273,22 @@ void run_cli()
 
         else if (command == "gain" or command == "g")
         {
+            string message("gain " + args);
+            if (recorder_pid != -1)
+                mq_send(mqdMap[REC_MQ_NAME], message.c_str(),
+                        sizeof(message), 0);
+            else
+                cout << "\nThe recorder has not started yet.";
         }
 
         else if (command == "frequency" or command == "freq" or command == "f")
         {
+            string message("freq " + args);
+            if (recorder_pid != -1)
+                mq_send(mqdMap[REC_MQ_NAME], message.c_str(),
+                        sizeof(message), 0);
+            else
+                cout << "\nThe recorder has not started yet.";
         }
 
         else if (command == "quit" or command == "q")
@@ -283,8 +307,7 @@ void run_cli()
             std::cout << "\nNo such option.\n";
         }
 
-        sleep_for(250ms);
-        cout << "\nscannerbot> ";
+        sleep_for(50ms);
     }
 }
 
@@ -313,11 +336,48 @@ void mq_init()
     }
 }
 
+static int callback(void* data, int argc, char** argv, char** azColName) {
+    for (int i = 0; i < argc; i++) {
+        std::cout << azColName[i] << ": " << (argv[i] ? argv[i] : "NULL") << std::endl;
+    }
+    std::cout << std::endl;
+    return 0;
+}
+
+void db_init()
+{
+    char *errmsg = 0;
+
+    // Open database
+    int resultcode = sqlite3_open("db/info.db", &db);
+    if (resultcode != SQLITE_OK)
+    {
+        cout << "Can't open database: " << sqlite3_errmsg(db) << '\n';
+        sqlite3_close(db);
+    }
+
+    // Create table
+    const char *createTableSQL =
+        "CREATE TABLE IF NOT EXISTS info(\
+            id INTEGER PRIMARY KEY AUTOINCREMENT,\
+            timestamp TEXT, freq TEXT, agency TEXT,\
+            transcript TEXT, audioPath TEXT, audioDuration TEXT,\
+            postID TEXT, postURL TEXT);";
+
+    resultcode = sqlite3_exec(db, createTableSQL, callback, 0, &errmsg);
+    if (resultcode != SQLITE_OK)
+    {
+        std::cerr << "SQL error: " << errmsg << std::endl;
+        sqlite3_free(errmsg);
+    }
+}
+
 int main()
 {
     signal(SIGINT, interruptHandler); // Handler for keyboard interrupt
 
     mq_init(); // Set up inter-process communication
+    db_init();
 
     cout << '\n'
          << R"(   ____                           __        __ )" << '\n'
@@ -328,7 +388,7 @@ int main()
 
     cout << R"(    An experiment in software engineering by   )" << '\n'
          << R"(         Citlally Gomez  Corey Talbert         )" << '\n'
-         << R"(            Kailyn King  Andrew Le             )" << '\n'
+         << R"(            Kailyn King  Andrew Le             )"
          << std::endl;
 
     show_help(); // List available commands

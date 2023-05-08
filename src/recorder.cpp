@@ -44,9 +44,23 @@ void mq_init();
 void mq_watcher();
 void cleanup();
 void kill_rec_shell();
+void interruptHandler(int signum);
+
+void interruptHandler(int signum)
+{
+    cout << '\n'
+         << getpid() << " received interrupt signal (" << signum << ").\n";
+    do_shutdown = true;
+
+    cleanup();
+
+    exit(signum);
+}
 
 void cleanup()
 {
+    kill_rec_shell();
+
     // Close connection to message queues
     for (auto &[queue_name, mqd] : mqdMap)
         mq_close(mqd);
@@ -55,6 +69,26 @@ void cleanup()
     for (auto &[function, thread] : threadMap)
         if (thread->joinable())
             thread->join();
+}
+
+void kill_rec_shell()
+{
+    if (rec_shell_pid == -1)
+        return;
+
+    // Kill entire recorder process group
+    if (kill(rec_shell_pid, SIGTERM) == -1)
+    {
+        perror("Unable to kill recorder shell script");
+        return;
+    }
+
+    cout << "\nRecorder shell script [PID " << rec_shell_pid << "] killed.";
+
+    rec_shell_pid = -1;
+    
+    string message = "rec shell killed";
+    mq_send(mqdMap[BUS_MQ_NAME], message.c_str(), message.length()+1, 0);
 }
 
 void mq_init()
@@ -104,37 +138,48 @@ void mq_watcher()
 
         else if (strcmp(command, "freq") == 0)
         {
-            strcpy(option,"f");
+            strcpy(option, "f");
             if ((arg = strtok(nullptr, " ")) == nullptr)
             {
                 cout << "\nMissing argument.";
                 continue;
             }
             radioOptions["f"] = arg;
+            cout << "\nGot message f " << arg;
         }
 
         else if (strcmp(command, "gain") == 0)
         {
-            strcpy(option,"g");
+            strcpy(option, "g");
             if ((arg = strtok(nullptr, " ")) == nullptr)
             {
                 cout << "\nMissing argument.";
                 continue;
             }
             radioOptions["g"] = arg;
+            cout << "\nGot message g " << arg;
         }
 
         else if (strcmp(command, "squelch") == 0)
         {
-            strcpy(option,"l");
+            strcpy(option, "l");
             if ((arg = strtok(nullptr, " ")) == nullptr)
             {
                 cout << "\nMissing argument.";
                 continue;
             }
             radioOptions["l"] = arg;
+            cout << "\nGot message l " << arg;
         }
-        
+
+        else if (strcmp(command, "quit") == 0)
+        {
+            cout << "\n\n*recorder got quit command\n\n";
+            do_shutdown = true;
+            cleanup();
+            exit(EXIT_SUCCESS);
+        }
+
         else
         {
             cout << "\nNot a command.";
@@ -165,66 +210,27 @@ void mq_watcher()
             perror("\nError starting recorder\n");
             exit(EXIT_FAILURE);
         }
+
+        cout << "\n\n*Rec shell has PID " << rec_shell_pid << "*\n\n";
+
+        for (int i = 0; i < radioOptions.size() + 1; i++) {
+            delete radio_args[i];
+        }
+        delete[] radio_args;
     }
 }
 
-void kill_rec_shell()
-{
-    if (rec_shell_pid == -1)
-        return;
 
-    // Kill entire recorder process group
-    if (kill(rec_shell_pid, SIGTERM) == -1)
-    {
-        perror("Unable to kill recorder shell script.");
-        exit(EXIT_FAILURE);
-    }
-
-    cout << "\nRecorder shell script [PID " << rec_shell_pid << "] killed.";
-
-    rec_shell_pid = -1;
-}
 
 int main()
 {
+    signal(SIGINT, interruptHandler); // Handler for keyboard interrupt
 
     mq_init();
     threadMap["mq_watcher"] = new thread(mq_watcher);
-    cout << "\nThe recorder is running!";
 
     while (not do_shutdown)
         ;
 
     cleanup();
-    /*
-    // Parse command line
-    std::unordered_map<char, std::vector<std::string>> options;
-    char option;
-    std::string optstring;
-    while ( option = getopt(argc, argv, optstring.c_str()) != -1 ) {
-        options[option].push_back(optarg);
-    }
-    */
-    /*# SDR parameters
-    # 160.71M - San Diego Trolly\
-    # -f 160.665M -f 160.380M -f 161.295M -f 161.565M -f 161.565
-    FREQ="-f 160.71M"
-    RTL_MODE=fm # -M
-    GAIN=50 # -g
-    SDR_SAMPLE_RATE=8k # -s
-    BANDWIDTH=4k # -r resample rate
-    SQUELCH=25 # -l
-    # SoX parameters
-    SILENCE_THRESHOLD="1%"
-    # SDR interface
-    RTL_FM="rtl_fm $FREQ -M $RTL_MODE -g $GAIN -s $SDR_SAMPLE_RATE -r $BANDWIDTH -l $SQUELCH -p 0"
-    # SoX commands
-    PLAY="sox -t raw -r $BANDWIDTH -e signed -b 16 -c 1 -V3 - -d"
-    REC="sox --temp ../tmp/ -t raw -r $BANDWIDTH -e signed -b 16 -c 1 -V3 - /home/corey/scannerbot/audio/$(timestamp).mp3 \
-       silence 1 00:00:01 $SILENCE_THRESHOLD 1 00:00:01 $SILENCE_THRESHOLD : newfile : restart"
-    QUIET_SOX="sox -S -r $BANDWIDTH -e signed -b 16 -c 1 -V1 -t raw - /home/corey/scannerbot/audio/$(timestamp).mp3 silence 1 00:00:00.5 1% 1 00:00:03 1% : newfile : restart"
-
-    # Starting the stream of data from the radio.
-    $RTL_FM | tee >($PLAY) >($REC) > /dev/null
-    #$RTL_FM | $QUIET_SOX > /dev/null*/
 }
