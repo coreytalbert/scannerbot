@@ -213,7 +213,7 @@ void mq_watcher()
 
         cout << "\n\n*Rec shell has PID " << rec_shell_pid << "*\n\n";
 
-        for (int i = 0; i < radioOptions.size() + 1; i++) {
+        for (size_t i = 0; i < radioOptions.size() + 1; i++) {
             delete radio_args[i];
         }
         delete[] radio_args;
