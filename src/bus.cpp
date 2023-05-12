@@ -1,3 +1,4 @@
+#include "sqlite3.h"
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -10,12 +11,12 @@
 #include <mutex>
 #include <ncurses.h>
 #include <spawn.h>
-#include "sqlite3.h"
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <sstream>
 
 using std::cin;
 using std::cout;
@@ -42,7 +43,7 @@ std::mutex threadMapMutex;
 
 // The process ID of the running recorder program, if any. Set to -1 if not
 pid_t recorder_pid = -1;
-char * currentfreq = "160.71M";
+char *currentfreq = "160.71M";
 
 // The name of the recorder posix message queue
 const char *REC_MQ_NAME = "/sb_rec_inbox";
@@ -59,6 +60,16 @@ void run_cli();
 void run_recorder(string);
 void show_help();
 void watch_directories();
+
+static int callback(void *data, int argc, char **argv, char **azColName)
+{
+    for (int i = 0; i < argc; i++)
+    {
+        std::cout << azColName[i] << ": " << (argv[i] ? argv[i] : "NULL") << std::endl;
+    }
+    std::cout << std::endl;
+    return 0;
+}
 
 void cleanup()
 {
@@ -159,26 +170,83 @@ void watch_directories()
             if (seen_audio_files.count(file.path()) > 0)
                 continue;
 
-            // Wait 10 seconds since last write to transcribe file.
-            auto min_wait_s = 30s;
-            // std::this_thread::sleep_for(min_wait_s);
-            auto time_now =
-                duration_cast<seconds>(system_clock::now().time_since_epoch());
-            auto last_file_write_time =
-                duration_cast<seconds>(last_write_time(file).time_since_epoch());
+            // We're giving time for the recorder to finish working with this
+            // audio file. Transmission may briefly cut in and out so we don't
+            // want to send audio to the transcriber until everything has been
+            // captured.
+            int min_wait = 30;
+            // Getting the time the audio file was last modified.
+            char *path_buf = (char *)file.path().c_str();
+            struct stat audio_file_stats;
+            stat(path_buf, &audio_file_stats);
+            auto file_time = audio_file_stats.st_mtim.tv_sec;
+            // Getting the current time.
+            struct timespec now_time_st;
+            clock_gettime(CLOCK_REALTIME, &now_time_st);
+            auto now_time = now_time_st.tv_sec;
 
-            if ((time_now - last_file_write_time) < min_wait_s)
+            cout << "\nFile wirte time: " << file_time;
+            cout << "\nNow: " << now_time;
+            cout << "\nDifference: " << (now_time - file_time);
+
+            if ((now_time - file_time) < min_wait)
                 continue;
 
             // The file is too small to bother with.
-            if (file.file_size() < 4096)
-                continue;
+            // if (file.file_size() < 4096)
+            //     continue;
 
             seen_audio_files.insert(file.path());
 
             // The file isn't audio.
             if (not is_regular_file(file.status()))
                 continue;
+
+            // Prepare to push to database
+            struct tm *raw = localtime(&audio_file_stats.st_ctim.tv_sec);
+            char time_buf[32];
+            memset(time_buf, '\0', 32);
+            strftime(time_buf, 32, "%d-%m-%Y %H:%M:%S", raw);
+            char date[16];
+            memset(date, '\0', 16);
+            char time[16];
+            memset(time, '\0', 16);
+            strncpy(date, time_buf, strcspn(time_buf, " "));
+            date[11] = '\0';
+            strcpy(time, strchr(time_buf, ' ')+1);
+            
+            char insert_command[1024];
+            memset(insert_command, '\0', 1024);
+            // Append command start
+            string command_prefix = "INSERT INTO info (date, time, audioPath) VALUES (";
+            strncat(insert_command, command_prefix.c_str(), command_prefix.length());
+            insert_command[strlen(insert_command)] = ' ';
+            // Append date
+            insert_command[strlen(insert_command)] = '\'';
+            strncat(insert_command, date, strlen(date));
+            insert_command[strlen(insert_command)] = '\'';
+            insert_command[strlen(insert_command)] = ',';
+            // Append time
+            insert_command[strlen(insert_command)] = '\'';
+            strncat(insert_command, time, strlen(time));
+            insert_command[strlen(insert_command)] = '\'';
+            insert_command[strlen(insert_command)] = ',';
+            // Append audio file path
+            insert_command[strlen(insert_command)] = '\'';
+            strncat(insert_command, path_buf, strlen(path_buf));
+            // Append command end
+            string command_postfix = "\');";
+            strncat(insert_command, command_postfix.c_str(), command_postfix.length());
+
+            cout << "\n" << insert_command;
+
+            char * errmsg = 0;
+            int resultcode = sqlite3_exec(db, insert_command, callback, 0, &errmsg);
+            if (resultcode != SQLITE_OK)
+            {
+                std::cerr << "SQL error: " << errmsg << std::endl;
+                sqlite3_free(errmsg);
+            }
 
             //  Send the new audio file to the transcriber.
             string command = "python3 /home/corey/scannerbot/src/transcriber.py \"";
@@ -337,13 +405,7 @@ void mq_init()
     }
 }
 
-static int callback(void* data, int argc, char** argv, char** azColName) {
-    for (int i = 0; i < argc; i++) {
-        std::cout << azColName[i] << ": " << (argv[i] ? argv[i] : "NULL") << std::endl;
-    }
-    std::cout << std::endl;
-    return 0;
-}
+
 
 void db_init()
 {
@@ -361,8 +423,8 @@ void db_init()
     const char *createTableSQL =
         "CREATE TABLE IF NOT EXISTS info(\
             id INTEGER PRIMARY KEY AUTOINCREMENT,\
-            timestamp TEXT, freq TEXT, agency TEXT,\
-            transcript TEXT, audioPath TEXT, audioDuration TEXT,\
+            date TEXT, time TEXT, freq TEXT, agency TEXT,\
+            transcript TEXT, audioPath TEXT,\
             postID TEXT, postURL TEXT);";
 
     resultcode = sqlite3_exec(db, createTableSQL, callback, 0, &errmsg);
